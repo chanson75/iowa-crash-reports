@@ -3,12 +3,15 @@ import sys
 import sqlite3
 from datetime import datetime
 from urllib.parse import urljoin, urlparse, parse_qs
+from supabase import create_client, Client
 
 import requests
 from bs4 import BeautifulSoup
 
 BASE = "https://accidentreports.iowa.gov/"
 RESULTS_URL = "https://accidentreports.iowa.gov/?dist=scraper"
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ----------------------
 # Helpers
@@ -254,55 +257,83 @@ def init_db(conn: sqlite3.Connection):
 # ----------------------
 # Insert helpers
 # ----------------------
-def insert_report(conn, rep):
-    cur = conn.cursor()
-    cur.execute("""
-    INSERT OR REPLACE INTO reports (
-        case_number, report_type, county, crash_date, crash_time,
-        location, officer_name, post, assisted_by, summary
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        rep.get("case_number"), rep.get("report_type"), rep.get("county"),
-        rep.get("crash_date"), rep.get("crash_time"), rep.get("location"),
-        rep.get("officer_name"), rep.get("post"), rep.get("assisted_by"),
-        rep.get("summary")
-    ))
+def insert_report_supabase(rep):
+    """Insert or update a report row in Supabase."""
+    if not rep.get("case_number"):
+        return
+    data = {
+        "case_number": rep.get("case_number"),
+        "report_type": rep.get("report_type"),
+        "county": rep.get("county"),
+        "crash_date": rep.get("crash_date"),
+        "crash_time": rep.get("crash_time"),
+        "location": rep.get("location"),
+        "officer_name": rep.get("officer_name"),
+        "post": rep.get("post"),
+        "assisted_by": rep.get("assisted_by"),
+        "summary": rep.get("summary"),
+    }
+    supabase.table("reports").upsert(data, on_conflict="case_number").execute()
 
-def insert_vehicles(conn, case_number, vehicles):
-    cur = conn.cursor()
-    cur.execute("DELETE FROM vehicles WHERE case_number = ?", (case_number,))
+def insert_vehicles_supabase(case_number, vehicles):
+    """Insert vehicles for a report in Supabase."""
+    to_insert = []
     for v in vehicles:
         if v.get("year") in ["Make:"]:
             continue
-        cur.execute("""
-        INSERT INTO vehicles (
-            case_number, vehicle_number, year, make, type,
-            towed_by, driver_name, age, city_state
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            case_number, v.get("vehicle_number"), v.get("year"),
-            v.get("make"), v.get("type"), v.get("towed_by"),
-            v.get("driver_name"), v.get("age"), v.get("city_state")
-        ))
+        to_insert.append({
+            "case_number": case_number,
+            "vehicle_number": v.get("vehicle_number"),
+            "year": v.get("year"),
+            "make": v.get("make"),
+            "type": v.get("type"),
+            "towed_by": v.get("towed_by"),
+            "driver_name": v.get("driver_name"),
+            "age": v.get("age"),
+            "city_state": v.get("city_state"),
+        })
+    if to_insert:
+        supabase.table("vehicles").upsert(to_insert).execute()
 
-def insert_injuries(conn, case_number, injuries):
-    cur = conn.cursor()
-    cur.execute("DELETE FROM injuries WHERE case_number = ?", (case_number,))
+def insert_injuries_supabase(case_number, injuries):
+    to_insert = []
     for inj in injuries:
         if inj.get("type") not in ["Injured", "Fatality"]:
             continue
-        cur.execute("""
-        INSERT INTO injuries (
-            case_number, injury_index, type, name, age,
-            city_state, seatbelt_use, life_saved_by_seatbelt,
-            transported_to, transported_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            case_number, inj.get("injury_index"), inj.get("type"),
-            inj.get("name"), inj.get("age"), inj.get("city_state"),
-            inj.get("seatbelt_use"), inj.get("life_saved_by_seatbelt"),
-            inj.get("transported_to"), inj.get("transported_by")
-        ))
+        to_insert.append({
+            "case_number": case_number,
+            "injury_index": inj.get("injury_index"),
+            "type": inj.get("type"),
+            "name": inj.get("name"),
+            "age": inj.get("age"),
+            "city_state": inj.get("city_state"),
+            "seatbelt_use": inj.get("seatbelt_use"),
+            "life_saved_by_seatbelt": inj.get("life_saved_by_seatbelt"),
+            "transported_to": inj.get("transported_to"),
+            "transported_by": inj.get("transported_by"),
+        })
+    if to_insert:
+        supabase.table("injuries").upsert(to_insert).execute()
+
+def insert_motor_carriers_supabase(case_number, carriers):
+    to_insert = []
+    for c in carriers:
+        carrier_name = c.get("name_of_carrier")
+        usdot = c.get("dot_or_mcc_#")
+        if not carrier_name or carrier_name.strip() in ["DOT or MCC #:", ""]:
+            continue
+        if not usdot or usdot.strip() in ["DOT or MCC #:", ""]:
+            continue
+        to_insert.append({
+            "case_number": case_number,
+            "carrier_name": carrier_name,
+            "usdot_or_mcc": usdot,
+            "city_state": c.get("city_state_of_carrier"),
+            "hazmat_involved": c.get("hazmat_involved?")
+        })
+    if to_insert:
+        supabase.table("motor_carriers").upsert(to_insert).execute()
+
 
 def insert_motor_carriers(conn, case_number, carriers):
     cur = conn.cursor()
@@ -409,15 +440,15 @@ def main(argv):
                 print("  Using caseno from URL:", rep['case_number'])
 
         if rep.get("case_number"):
-            with conn:
-                insert_report(conn, rep)
-                if parsed['vehicles']:
-                    insert_vehicles(conn, rep['case_number'], parsed['vehicles'])
-                if parsed['injuries']:
-                    insert_injuries(conn, rep['case_number'], parsed['injuries'])
-                if parsed['motor_carrier']:
-                    insert_motor_carriers(conn, rep['case_number'], parsed['motor_carrier'])
+            insert_report_supabase(rep)
+            if parsed['vehicles']:
+                insert_vehicles_supabase(rep['case_number'], parsed['vehicles'])
+            if parsed['injuries']:
+                insert_injuries_supabase(rep['case_number'], parsed['injuries'])
+            if parsed['motor_carrier']:
+                insert_motor_carriers_supabase(rep['case_number'], parsed['motor_carrier'])
             print(f"  -> inserted case: {rep['case_number']}")
+
         else:
             print("  -> still missing case_number, not inserted.")
 
