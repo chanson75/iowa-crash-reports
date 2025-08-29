@@ -1,23 +1,33 @@
 import re
 import sys
-import sqlite3
 from datetime import datetime
 from urllib.parse import urljoin, urlparse, parse_qs
-from supabase import create_client, Client
+import os
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from supabase import create_client, Client
+
+# ----------------------
+# Load environment
+# ----------------------
+load_dotenv()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("SUPABASE_URL or SUPABASE_KEY not set in environment")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 BASE = "https://accidentreports.iowa.gov/"
 RESULTS_URL = "https://accidentreports.iowa.gov/?dist=scraper"
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ----------------------
 # Helpers
 # ----------------------
 def get_clean_text(html: str) -> str:
-    """Return cleaned text with normalized whitespace and NBSP removed."""
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text("\n")
     text = text.replace("\xa0", " ")
@@ -40,17 +50,11 @@ def parse_crash_date(s: str) -> str:
     if not s:
         return ""
     s = s.strip()
-    if re.match(r"^\d{6,8}$", s):
-        for fmt in ("%m%d%Y", "%Y%m%d", "%m%d%y"):
-            try:
-                return datetime.strptime(s, fmt).date().isoformat()
-            except:
-                pass
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y", "%m-%d-%Y"):
+    for fmt in ("%m%d%Y", "%Y%m%d", "%m%d%y", "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y", "%m-%d-%Y"):
         try:
             return datetime.strptime(s, fmt).date().isoformat()
         except:
-            pass
+            continue
     return s
 
 def parse_time(s: str) -> str:
@@ -107,7 +111,7 @@ def parse_minimal_report(html: str, url: str = None) -> dict:
             else:
                 report[key] = val
 
-    if (not report["case_number"]) and url:
+    if not report["case_number"] and url:
         try:
             qs = parse_qs(urlparse(url).query)
             if "caseno" in qs:
@@ -192,73 +196,9 @@ def parse_minimal_report(html: str, url: str = None) -> dict:
     }
 
 # ----------------------
-# SQLite helpers
-# ----------------------
-def init_db(conn: sqlite3.Connection):
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS reports (
-        case_number TEXT PRIMARY KEY,
-        report_type TEXT,
-        county TEXT,
-        crash_date TEXT,
-        crash_time TEXT,
-        location TEXT,
-        officer_name TEXT,
-        post TEXT,
-        assisted_by TEXT,
-        summary TEXT,
-        retrieved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS vehicles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_number TEXT,
-        vehicle_number INTEGER,
-        year TEXT,
-        make TEXT,
-        type TEXT,
-        towed_by TEXT,
-        driver_name TEXT,
-        age TEXT,
-        city_state TEXT,
-        FOREIGN KEY(case_number) REFERENCES reports(case_number)
-    )
-    """)
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS injuries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_number TEXT,
-        injury_index INTEGER,
-        type TEXT,
-        name TEXT,
-        age TEXT,
-        city_state TEXT,
-        seatbelt_use TEXT,
-        life_saved_by_seatbelt TEXT,
-        transported_to TEXT,
-        transported_by TEXT,
-        FOREIGN KEY(case_number) REFERENCES reports(case_number)
-    )
-    """)
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS motor_carriers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_number TEXT,
-        carrier_name TEXT,
-        usdot_or_mcc TEXT,
-        city_state TEXT,
-        hazmat_involved TEXT
-    )
-    """)
-    conn.commit()
-
-# ----------------------
-# Insert helpers
+# Supabase inserts
 # ----------------------
 def insert_report_supabase(rep):
-    """Insert or update a report row in Supabase."""
     if not rep.get("case_number"):
         return
     data = {
@@ -276,7 +216,6 @@ def insert_report_supabase(rep):
     supabase.table("reports").upsert(data, on_conflict="case_number").execute()
 
 def insert_vehicles_supabase(case_number, vehicles):
-    """Insert vehicles for a report in Supabase."""
     to_insert = []
     for v in vehicles:
         if v.get("year") in ["Make:"]:
@@ -334,35 +273,8 @@ def insert_motor_carriers_supabase(case_number, carriers):
     if to_insert:
         supabase.table("motor_carriers").upsert(to_insert).execute()
 
-
-def insert_motor_carriers(conn, case_number, carriers):
-    cur = conn.cursor()
-    cur.execute("DELETE FROM motor_carriers WHERE case_number = ?", (case_number,))
-    for c in carriers:
-        carrier_name = c.get("name_of_carrier")
-        usdot = c.get("dot_or_mcc_#")
-
-        # Skip empty or placeholder rows
-        if not carrier_name or carrier_name.strip() in ["DOT or MCC #:", ""]:
-            continue
-        if not usdot or usdot.strip() in ["DOT or MCC #:", ""]:
-            continue
- 
-        cur.execute("""
-        INSERT INTO motor_carriers (
-            case_number, carrier_name, usdot_or_mcc, city_state, hazmat_involved
-        ) VALUES (?, ?, ?, ?, ?)
-        """, (
-            case_number,
-            carrier_name,
-            usdot,
-            c.get("city_state_of_carrier"),
-            c.get("hazmat_involved?")
-        ))
-
-
 # ----------------------
-# Listing fetcher
+# Fetch listings
 # ----------------------
 def search_crashes_in_range(start_date: datetime, end_date: datetime):
     r = requests.get(RESULTS_URL, timeout=30)
@@ -403,11 +315,10 @@ def parse_input_date(s: str) -> datetime:
 
 def main(argv):
     if len(argv) < 3:
-        print("Usage: python main.py <start_date> <end_date> [db_path]")
+        print("Usage: python main.py <start_date> <end_date>")
         return
     start = parse_input_date(argv[1])
     end = parse_input_date(argv[2])
-    db_path = argv[3] if len(argv) > 3 else "crashes.db"
 
     print(f"Searching results page for crashes from {start.date()} to {end.date()} ...")
     matches = search_crashes_in_range(start, end)
@@ -415,9 +326,6 @@ def main(argv):
         print("No crash listings found in the Results list for that date range.")
         return
 
-    conn = sqlite3.connect(db_path, timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    init_db(conn)
     sess = requests.Session()
 
     for idx, m in enumerate(matches, 1):
@@ -426,34 +334,22 @@ def main(argv):
         resp.raise_for_status()
         parsed = parse_minimal_report(resp.text, url=m['url'])
         rep = parsed['report']
-        print("  Parsed report (top-level fields):")
-        for k, v in rep.items():
-            print(f"    {k}: {v}")
-        print("  Raw text preview (first ~8 lines):")
-        for ln in parsed.get("raw_text_sample", []):
-            print("    " + ln)
 
         if not rep.get("case_number"):
             qs = parse_qs(urlparse(m['url']).query)
             if 'caseno' in qs:
                 rep['case_number'] = qs['caseno'][0]
-                print("  Using caseno from URL:", rep['case_number'])
 
         if rep.get("case_number"):
             insert_report_supabase(rep)
-            if parsed['vehicles']:
-                insert_vehicles_supabase(rep['case_number'], parsed['vehicles'])
-            if parsed['injuries']:
-                insert_injuries_supabase(rep['case_number'], parsed['injuries'])
-            if parsed['motor_carrier']:
-                insert_motor_carriers_supabase(rep['case_number'], parsed['motor_carrier'])
+            insert_vehicles_supabase(rep['case_number'], parsed['vehicles'])
+            insert_injuries_supabase(rep['case_number'], parsed['injuries'])
+            insert_motor_carriers_supabase(rep['case_number'], parsed['motor_carrier'])
             print(f"  -> inserted case: {rep['case_number']}")
-
         else:
-            print("  -> still missing case_number, not inserted.")
+            print("  -> missing case_number, skipped.")
 
-    conn.close()
-    print("\nDone. DB updated.")
+    print("\nDone. Data inserted into Supabase.")
 
 if __name__ == "__main__":
     main(sys.argv)
