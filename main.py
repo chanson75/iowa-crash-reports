@@ -173,6 +173,7 @@ def parse_minimal_report(html: str, url: str = None) -> dict:
         injuries.append(inj)
 
     # MOTOR CARRIER
+    # MOTOR CARRIER
     motor_carrier = []
     if "Motor Carrier Info" in text:
         mc_block_re = re.compile(r"Motor Carrier Info(.*?)(?=(?:\n\s*Summary:)|$)", re.S | re.I)
@@ -185,7 +186,11 @@ def parse_minimal_report(html: str, url: str = None) -> dict:
                 if v:
                     key = lab.lower().replace(" ", "_")
                     mc_entry[key] = v
-            motor_carrier.append(mc_entry)
+            
+            # Only append if not already in the list
+            if mc_entry and mc_entry not in motor_carrier:
+                motor_carrier.append(mc_entry)
+
 
     return {
         "report": report,
