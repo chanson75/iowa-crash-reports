@@ -316,7 +316,7 @@ def insert_motor_carriers(conn, case_number, carriers):
             continue
         if not usdot or usdot.strip() in ["DOT or MCC #:", ""]:
             continue
-
+ 
         cur.execute("""
         INSERT INTO motor_carriers (
             case_number, carrier_name, usdot_or_mcc, city_state, hazmat_involved
