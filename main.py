@@ -263,8 +263,7 @@ def insert_injuries_supabase(case_number, injuries):
         })
     if to_insert:
         # Use unique constraint (case_number + injury_index)
-        supabase.table("injuries").upsert(to_insert, on_conflict=["case_number", "injury_index"]).execute()
-
+        supabase.table("injuries").upsert(to_insert, on_conflict="case_number, injury_index").execute()
 
 def insert_motor_carriers_supabase(case_number, carriers):
     to_insert = []
@@ -284,7 +283,7 @@ def insert_motor_carriers_supabase(case_number, carriers):
         })
     if to_insert:
         # Use unique constraint (case_number + usdot_or_mcc)
-        supabase.table("motor_carriers").upsert(to_insert, on_conflict=["case_number", "usdot_or_mcc"]).execute()
+        supabase.table("motor_carriers").upsert(to_insert, on_conflict="case_number, usdot_or_mcc").execute()
 
 
 # ----------------------
