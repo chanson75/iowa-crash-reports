@@ -241,7 +241,15 @@ def insert_vehicles_supabase(case_number, vehicles):
         })
     if to_insert:
         # Use unique constraint (case_number + vehicle_number) to avoid duplicates
-        supabase.table("vehicles").upsert(to_insert, on_conflict="case_number,vehicle_number").execute()
+        unique = {
+            (row["case_number"], row["vehicle_number"]): row
+            for row in to_insert
+        }
+        supabase.table("vehicles").upsert(
+            list(unique.values()),
+            on_conflict="case_number,vehicle_number"
+        ).execute()
+
 
 
 def insert_injuries_supabase(case_number, injuries):
@@ -262,8 +270,11 @@ def insert_injuries_supabase(case_number, injuries):
             "transported_by": inj.get("transported_by"),
         })
     if to_insert:
-        # Use unique constraint (case_number + injury_index)
-        supabase.table("injuries").upsert(to_insert, on_conflict="case_number, injury_index").execute()
+        unique = {
+            (row["case_number"], row["injury_index"]): row
+            for row in to_insert
+        }
+        supabase.table("injuries").upsert(list(unique.values()), on_conflict="case_number, injury_index").execute()
 
 def insert_motor_carriers_supabase(case_number, carriers):
     to_insert = []
@@ -282,8 +293,14 @@ def insert_motor_carriers_supabase(case_number, carriers):
             "hazmat_involved": c.get("hazmat_involved?"),
         })
     if to_insert:
-        # Use unique constraint (case_number + usdot_or_mcc)
-        supabase.table("motor_carriers").upsert(to_insert, on_conflict="case_number, usdot_or_mcc").execute()
+        unique = {
+            (row["case_number"], row["usdot_or_mcc"]): row
+            for row in to_insert
+        }
+        supabase.table("motor_carriers").upsert(
+            list(unique.values()),
+            on_conflict="case_number, usdot_or_mcc"
+        ).execute()
 
 
 # ----------------------
