@@ -241,7 +241,7 @@ def insert_vehicles_supabase(case_number, vehicles):
         })
     if to_insert:
         # Use unique constraint (case_number + vehicle_number) to avoid duplicates
-        supabase.table("vehicles").upsert(to_insert, on_conflict=["case_number", "vehicle_number"]).execute()
+        supabase.table("vehicles").upsert(to_insert, on_conflict="case_number,vehicle_number").execute()
 
 
 def insert_injuries_supabase(case_number, injuries):
