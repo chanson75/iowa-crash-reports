@@ -40,11 +40,18 @@ def extract_label(text: str, label: str) -> str | None:
     pattern = rf"{el}:\s*(?P<val>.*?)(?=(?:\s{{2,}}[A-Za-z0-9 &()\/-]+?:)|(?:\n[A-Za-z0-9 &()\/-]+?:)|$)"
     m = re.search(pattern, text, re.S | re.I)
     if m:
-        return re.sub(r"\s{2,}", " ", m.group("val").strip())
+        val = re.sub(r"\s{2,}", " ", m.group("val").strip())
+        if not val:  # empty string
+            return None
+        return val
     m2 = re.search(rf"{el}:\s*(?P<val>[^\n\r]+)", text, re.I)
     if m2:
-        return m2.group("val").strip()
+        val = m2.group("val").strip()
+        if not val:
+            return None
+        return val
     return None
+
 
 def parse_crash_date(s: str) -> str:
     if not s:
