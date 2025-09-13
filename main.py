@@ -173,6 +173,7 @@ def parse_minimal_report(html: str, url: str = None) -> dict:
         injuries.append(inj)
 
     # MOTOR CARRIER
+    # MOTOR CARRIER
     motor_carrier = []
     if "Motor Carrier Info" in text:
         mc_block_re = re.compile(r"Motor Carrier Info(.*?)(?=(?:\n\s*Summary:)|$)", re.S | re.I)
@@ -185,7 +186,11 @@ def parse_minimal_report(html: str, url: str = None) -> dict:
                 if v:
                     key = lab.lower().replace(" ", "_")
                     mc_entry[key] = v
-            motor_carrier.append(mc_entry)
+            
+            # Only append if not already in the list
+            if mc_entry and mc_entry not in motor_carrier:
+                motor_carrier.append(mc_entry)
+
 
     return {
         "report": report,
@@ -199,6 +204,7 @@ def parse_minimal_report(html: str, url: str = None) -> dict:
 # Supabase inserts
 # ----------------------
 def insert_report_supabase(rep):
+    """Insert or update a report row in Supabase."""
     if not rep.get("case_number"):
         return
     data = {
@@ -215,7 +221,9 @@ def insert_report_supabase(rep):
     }
     supabase.table("reports").upsert(data, on_conflict="case_number").execute()
 
+
 def insert_vehicles_supabase(case_number, vehicles):
+    """Insert vehicles for a report in Supabase."""
     to_insert = []
     for v in vehicles:
         if v.get("year") in ["Make:"]:
@@ -232,7 +240,9 @@ def insert_vehicles_supabase(case_number, vehicles):
             "city_state": v.get("city_state"),
         })
     if to_insert:
-        supabase.table("vehicles").upsert(to_insert).execute()
+        # Use unique constraint (case_number + vehicle_number) to avoid duplicates
+        supabase.table("vehicles").upsert(to_insert, on_conflict=["case_number", "vehicle_number"]).execute()
+
 
 def insert_injuries_supabase(case_number, injuries):
     to_insert = []
@@ -252,7 +262,9 @@ def insert_injuries_supabase(case_number, injuries):
             "transported_by": inj.get("transported_by"),
         })
     if to_insert:
-        supabase.table("injuries").upsert(to_insert).execute()
+        # Use unique constraint (case_number + injury_index)
+        supabase.table("injuries").upsert(to_insert, on_conflict=["case_number", "injury_index"]).execute()
+
 
 def insert_motor_carriers_supabase(case_number, carriers):
     to_insert = []
@@ -268,10 +280,12 @@ def insert_motor_carriers_supabase(case_number, carriers):
             "carrier_name": carrier_name,
             "usdot_or_mcc": usdot,
             "city_state": c.get("city_state_of_carrier"),
-            "hazmat_involved": c.get("hazmat_involved?")
+            "hazmat_involved": c.get("hazmat_involved?"),
         })
     if to_insert:
-        supabase.table("motor_carriers").upsert(to_insert).execute()
+        # Use unique constraint (case_number + usdot_or_mcc)
+        supabase.table("motor_carriers").upsert(to_insert, on_conflict=["case_number", "usdot_or_mcc"]).execute()
+
 
 # ----------------------
 # Fetch listings

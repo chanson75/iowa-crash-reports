@@ -30,4 +30,7 @@ jobs:
 
       - name: Run scraper
         run: |
-          python main.py 2025-08-28 2025-08-28
+          START_DATE=$(date -d "30 days ago" +%Y-%m-%d)
+          END_DATE=$(date +%Y-%m-%d)
+          python main.py $START_DATE $END_DATE
+
