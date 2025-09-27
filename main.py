@@ -386,7 +386,9 @@ def main(argv):
         else:
             print("  -> missing case_number, skipped.")
 
-    print("\nDone. Data inserted into Supabase.")
+    print("\nDone. Data inserted into Supabase. Now converting county numbers to names.")
+
+    supabase.rpc("update_county_names").execute()
 
 if __name__ == "__main__":
     main(sys.argv)
